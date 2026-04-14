@@ -5,7 +5,7 @@ import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Listing, ShortcutCategory, ShowcaseCategory } from "@/lib/data";
-import { formatCurrency, siteTagline } from "@/lib/data";
+import { formatCurrency, siteName, siteTagline } from "@/lib/data";
 import { filterListings } from "@/components/category-browser";
 import {
   addItemToCart,
@@ -24,6 +24,23 @@ type Props = {
 };
 
 const cookieStorageKey = "lotlane-cookie-consent";
+
+const processSteps = [
+  {
+    title: "Sign Up",
+    description: "Create your bidder profile and unlock verified wholesale inventory."
+  },
+  {
+    title: "Place Your Bid",
+    description: "Bid live on timed listings or secure stock instantly with buy now."
+  },
+  {
+    title: "Win The Deal",
+    description: "Checkout fast, schedule delivery, and keep inventory moving."
+  }
+];
+
+const trustBar = ["Secure payments", "Verified sellers", "Real-time bidding"];
 
 function CartGlyph() {
   return (
@@ -53,6 +70,21 @@ function GavelGlyph() {
         strokeLinejoin="round"
         strokeWidth="1.8"
       />
+    </svg>
+  );
+}
+
+function ShieldGlyph() {
+  return (
+    <svg aria-hidden="true" className="button-icon" viewBox="0 0 24 24">
+      <path
+        d="M12 3l7 3v5c0 4.8-2.8 7.8-7 10-4.2-2.2-7-5.2-7-10V6l7-3Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      <path d="m9.5 11.8 1.7 1.7 3.5-4" fill="none" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
@@ -92,6 +124,13 @@ export function HomeMarketplace({
     [activeCategory, featuredListings, query]
   );
 
+  const heroListing = filteredListings[0] ?? featuredListings[0];
+  const featuredAuctions = filteredListings.slice(0, 5);
+  const endingSoon = [...filteredListings]
+    .filter((listing) => listing.endsIn)
+    .sort((first, second) => (first.endsIn ?? "").localeCompare(second.endsIn ?? ""))
+    .slice(0, 4);
+
   function handleCookieChoice(choice: "accepted" | "declined") {
     setCookieConsent(choice);
     window.localStorage.setItem(cookieStorageKey, choice);
@@ -118,162 +157,199 @@ export function HomeMarketplace({
 
   return (
     <>
-      <main className="market-home">
-        <section className="site-shell shortcut-strip">
-          {shortcutCategories.map((item) => (
-            <Link
-              className="shortcut-card"
-              href={{
-                pathname: "/categories",
-                query: {
-                  category: item.title.includes("Tools")
-                    ? "Tools & DIY"
-                    : item.title.includes("Customer Returns")
-                      ? "Home & Kitchen"
-                      : item.title.includes("Boxes")
-                        ? "Electronics"
-                        : "Office"
-                }
-              }}
-              key={item.title}
-            >
-              <div className="shortcut-icon-wrap">
-                <div className="shortcut-icon">{item.icon}</div>
+      <main className="market-home weeklybids-home">
+        <section className="site-shell weeklybids-hero-shell">
+          <div className="weeklybids-hero">
+            <div className="weeklybids-hero-copy">
+              <span className="weeklybids-kicker">Weekly auction marketplace</span>
+              <h1>
+                Bid. Win.
+                <br />
+                <span>Save Big.</span>
+              </h1>
+              <p>
+                Discover surplus products at unbeatable prices. New auction inventory drops every
+                week with secure checkout and faster closeout buying.
+              </p>
+
+              <div className="weeklybids-hero-actions">
+                <a className="weeklybids-primary" href="#featured-auctions">
+                  Browse Auctions
+                </a>
+                <a className="weeklybids-secondary" href="#how-it-works">
+                  How It Works
+                </a>
               </div>
+
+              <div className="weeklybids-trust-row">
+                {trustBar.map((item) => (
+                  <span key={item}>
+                    <ShieldGlyph />
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="weeklybids-hero-visual">
+              <div className="weeklybids-countdown">
+                <span>Auction ending soon</span>
+                <strong>{heroListing?.endsIn ?? "Live now"}</strong>
+              </div>
+
+              <div
+                className="weeklybids-device-stack"
+                style={{ ["--hero-gradient" as string]: heroListing?.gradient }}
+              >
+                <div className="weeklybids-device-card weeklybids-device-card-back">
+                  <span>{heroListing?.category ?? "Auctions"}</span>
+                </div>
+                <div className="weeklybids-device-card weeklybids-device-card-front">
+                  <span>{heroListing?.mode ?? "hybrid"}</span>
+                  <strong>{heroListing?.title ?? siteName}</strong>
+                  <small>{formatCurrency(heroListing?.buyNowPrice ?? heroListing?.currentBid ?? 0)}</small>
+                </div>
+                <div className="weeklybids-phone-card">
+                  <div className="weeklybids-phone-screen">
+                    <div className="weeklybids-phone-bar" />
+                    <div className="weeklybids-phone-tile" />
+                    <div className="weeklybids-phone-lines">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                    <div className="weeklybids-phone-cta">Bid now</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="site-shell weeklybids-overview-strip">
+          {shortcutCategories.map((item) => (
+            <article className="weeklybids-overview-card" key={item.title}>
+              <strong>{item.icon}</strong>
               <h2>{item.title}</h2>
               <p>{item.subtitle}</p>
-            </Link>
+            </article>
           ))}
         </section>
 
-        <section className="site-shell join-banner">
-          <div className="join-copy">
-            <p>Trusted by over 100,000 resellers</p>
-            <h1>{siteTagline}</h1>
-          </div>
-
-          <div className="join-actions">
-            <a className="join-primary" href="#showcase-products">
-              Explore live auctions
-            </a>
-            <Link className="join-secondary" href={{ pathname: "/categories" }}>
-              Browse categories
-            </Link>
-            <span>Search, bid, buy now, and manage active lots in one flow</span>
-          </div>
-        </section>
-
-        <section className="site-shell product-section" id="popular-categories">
-          <div className="section-title-row">
-            <h2>Popular Categories</h2>
-            <Link href={{ pathname: "/categories" }}>View All</Link>
-          </div>
-
-          <div className="category-carousel-shell">
-            <button aria-label="Previous" className="carousel-arrow" type="button">
-              {"<"}
-            </button>
-
-            <div className="popular-category-grid">
-              {showcaseCategories.map((category) => (
-                <Link
-                  className="popular-category-card"
-                  href={{ pathname: "/categories", query: { category: category.name } }}
-                  key={category.name}
-                >
-                  <div className="popular-category-image">
-                    <span>{category.art}</span>
-                  </div>
-                  <h3>{category.name}</h3>
-                  <p>{category.featuredCount} live lots</p>
-                </Link>
-              ))}
+        <section className="site-shell weeklybids-section" id="featured-auctions">
+          <div className="section-title-row weeklybids-section-head">
+            <div>
+              <h2>Featured Auctions</h2>
+              <p>Hand-picked inventory with active bidding and buy-now shortcuts.</p>
             </div>
-          </div>
-        </section>
-
-        <section className="site-shell showcase-section" id="showcase-products">
-          <div className="section-title-row">
-            <h2>{filteredListings.length} Featured Products</h2>
-            <div className="section-title-actions">
-              {query || activeCategory ? (
-                <Link className="cart-launch-link reset-link" href={{ pathname: "/" }}>
-                  Clear filters
-                </Link>
-              ) : null}
-              <button className="cart-launch-link" onClick={() => setCartOpen(true)} type="button">
-                Open cart ({cartCount})
-              </button>
-            </div>
+            <Link href={{ pathname: "/categories" }}>View all auctions</Link>
           </div>
 
-          <div className="showcase-filter-summary">
-            <span>{activeCategory || "All categories"}</span>
-            <span>{query ? `Search: ${query}` : "No search filter"}</span>
-            <span>{filteredListings.length} result(s)</span>
-          </div>
-
-          <div className="showcase-product-grid">
-            {filteredListings.map((listing) => {
+          <div className="weeklybids-featured-grid">
+            {featuredAuctions.map((listing) => {
               const primaryPrice = listing.buyNowPrice ?? listing.currentBid ?? 0;
               const isAuctionOnly = listing.mode === "auction";
 
               return (
-                <article className="showcase-product-card" key={listing.slug}>
+                <article className="weeklybids-auction-card" key={listing.slug}>
                   <div
-                    className="showcase-product-art"
+                    className="weeklybids-auction-art"
                     style={{ ["--card-gradient" as string]: listing.gradient }}
                   >
-                    <span>{listing.category}</span>
+                    <span>{listing.endsIn ?? "Live"}</span>
                   </div>
-
-                  <div className="showcase-product-copy">
-                    <div className="showcase-chip-row">
-                      <span className="showcase-chip">{listing.mode}</span>
-                      <span className="showcase-chip">{listing.grade}</span>
-                    </div>
-
+                  <div className="weeklybids-auction-copy">
                     <h3>{listing.title}</h3>
-                    <p>{listing.summary}</p>
-
-                    <div className="showcase-price-row">
+                    <p>{listing.category}</p>
+                    <div className="weeklybids-auction-price">
                       <strong>{formatCurrency(primaryPrice)}</strong>
-                      <span>
-                        {listing.buyNowPrice ? "Buy now available" : `Current bid - ${listing.endsIn}`}
-                      </span>
+                      <small>{listing.location}</small>
                     </div>
-
-                    <div className="showcase-meta">
-                      <span>{listing.location}</span>
-                      <span>{listing.shipping}</span>
-                    </div>
-
-                    <div className="showcase-action-row">
+                    <div className="weeklybids-auction-actions">
                       {!isAuctionOnly ? (
-                        <button
-                          className="add-cart-button"
-                          onClick={() => addToCart(listing)}
-                          type="button"
-                        >
-                          <CartGlyph />
-                          <span>Add to cart</span>
+                        <button onClick={() => addToCart(listing)} type="button">
+                          Place Bid
                         </button>
                       ) : (
-                        <button className="add-cart-button" disabled type="button">
-                          <CartGlyph />
-                          <span>Auction only</span>
+                        <button className="is-muted" type="button">
+                          Auction Only
                         </button>
                       )}
-
-                      <Link className="auction-button" href={`/products/${listing.slug}`}>
-                        <GavelGlyph />
-                        <span>{listing.mode === "buy-now" ? "View product" : "E-auction"}</span>
-                      </Link>
+                      <Link href={`/products/${listing.slug}`}>View Lot</Link>
                     </div>
                   </div>
                 </article>
               );
             })}
+          </div>
+        </section>
+
+        <section className="site-shell weeklybids-dual-grid">
+          <section className="weeklybids-panel" id="how-it-works">
+            <div className="section-title-row weeklybids-section-head">
+              <div>
+                <h2>How It Works</h2>
+                <p>Three quick steps from account setup to checkout.</p>
+              </div>
+            </div>
+            <div className="weeklybids-steps">
+              {processSteps.map((step, index) => (
+                <article className="weeklybids-step-card" key={step.title}>
+                  <span>{index + 1}</span>
+                  <h3>{step.title}</h3>
+                  <p>{step.description}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="weeklybids-panel">
+            <div className="section-title-row weeklybids-section-head">
+              <div>
+                <h2>Shop By Category</h2>
+                <p>Browse the strongest inventory pockets on the marketplace.</p>
+              </div>
+            </div>
+            <div className="weeklybids-category-grid">
+              {showcaseCategories.slice(0, 6).map((category) => (
+                <Link
+                  className="weeklybids-category-card"
+                  href={{ pathname: "/categories", query: { category: category.name } }}
+                  key={category.name}
+                >
+                  <strong>{category.art}</strong>
+                  <span>{category.name}</span>
+                  <small>{category.featuredCount} live lots</small>
+                </Link>
+              ))}
+            </div>
+          </section>
+        </section>
+
+        <section className="site-shell weeklybids-section" id="ending-soon">
+          <div className="section-title-row weeklybids-section-head">
+            <div>
+              <h2>Ending Soon</h2>
+              <p>Don&apos;t miss these auctions with fast-closing windows.</p>
+            </div>
+            {(query || activeCategory) && <Link href={{ pathname: "/" }}>Clear filters</Link>}
+          </div>
+
+          <div className="weeklybids-ending-grid">
+            {endingSoon.map((listing) => (
+              <article className="weeklybids-ending-card" key={listing.slug}>
+                <div
+                  className="weeklybids-ending-art"
+                  style={{ ["--card-gradient" as string]: listing.gradient }}
+                />
+                <div className="weeklybids-ending-copy">
+                  <span>{listing.endsIn}</span>
+                  <h3>{listing.title}</h3>
+                  <p>{formatCurrency(listing.currentBid ?? listing.buyNowPrice ?? 0)}</p>
+                  <Link href={`/products/${listing.slug}`}>Open auction</Link>
+                </div>
+              </article>
+            ))}
           </div>
 
           {!filteredListings.length ? (
@@ -286,6 +362,50 @@ export function HomeMarketplace({
             </div>
           ) : null}
         </section>
+
+        <section className="site-shell weeklybids-newsletter">
+          <div>
+            <h2>Trusted. Secure. Transparent.</h2>
+            <p>
+              We protect your data, verify our sellers, and help make every auction feel fair.
+            </p>
+          </div>
+          <div className="weeklybids-newsletter-badges">
+            <span>SSL Secured</span>
+            <span>Verified Sellers</span>
+            <span>24/7 Support</span>
+          </div>
+          <form className="weeklybids-newsletter-form">
+            <input aria-label="Email address" placeholder="Enter your email" type="email" />
+            <button type="button">Subscribe</button>
+          </form>
+        </section>
+
+        <footer className="weeklybids-footer">
+          <div className="site-shell weeklybids-footer-grid">
+            <div>
+              <h3>{siteName}</h3>
+              <p>{siteTagline}</p>
+            </div>
+            <div>
+              <strong>Quick Links</strong>
+              <Link href="/">Auctions</Link>
+              <Link href="/categories">Categories</Link>
+              <Link href="/cart">Cart</Link>
+            </div>
+            <div>
+              <strong>Support</strong>
+              <Link href="/auth">Help Center</Link>
+              <Link href="/checkout">Shipping</Link>
+              <Link href="/signup">Create Account</Link>
+            </div>
+            <div>
+              <strong>Contact</strong>
+              <a href="mailto:hello@weeklybids.com">hello@weeklybids.com</a>
+              <span>Beirut, Lebanon</span>
+            </div>
+          </div>
+        </footer>
       </main>
 
       <button

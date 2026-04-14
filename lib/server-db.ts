@@ -2,30 +2,202 @@ import "server-only";
 
 import { featuredListings, type Listing } from "@/lib/data";
 import type { UserProfile } from "@/lib/auth";
+import { isAdminEmail } from "@/lib/admin";
+import { formatEndsIn, mapListingToAdminDraft, normalizeAdminItemInput, type AdminItemInput } from "@/lib/item-admin";
+import { normalizeBidAmount } from "@/lib/auction";
 import {
   createSupabaseAdminClient,
   createSupabaseServerAuthClient,
   isSupabaseConfigured
 } from "@/lib/supabase-server";
+import { assertAdminItemPayload, assertBidPayload } from "@/lib/validators";
 
-type ItemRow = Omit<Listing, "highlights" | "reserveMet"> & {
+type ItemRow = {
+  auction_id?: number | null;
+  slug: string;
+  title: string;
+  category: string;
+  summary: string;
+  mode: Listing["mode"];
+  status?: Listing["status"] | null;
+  location: string;
+  shipping: string;
+  currentBid?: number | null;
+  buyNowPrice?: number | null;
+  minimum_bid?: number | null;
+  reserve_price?: number | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  stock: number;
+  grade: string;
+  gradient: string;
   highlights: string[] | string | null;
-  reserveMet: boolean | null;
+  seoDescription: string;
+  currency_code?: string | null;
+  bidIncrement?: number | null;
+  bidCount?: number | null;
+  watchers?: number | null;
+  reserveMet?: boolean | null;
+  seller?: string | null;
+  lotNumber?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ItemAssetRow = {
+  asset_url: string;
+  alt_text?: string | null;
+  sort_order?: number | null;
+  is_primary?: boolean | null;
+};
+
+type BidRow = {
+  id: string;
+  item_slug: string;
+  user_id: string;
+  amount: number;
+  max_amount?: number | null;
+  status?: "active" | "winning" | "outbid" | "cancelled" | null;
+  created_at: string;
+  profiles?: {
+    fullName?: string | null;
+    email?: string | null;
+  } | null;
 };
 
 type ProfileRow = UserProfile & {
   id: string;
 };
 
+export type StoredBid = {
+  id: string;
+  amount: number;
+  maxAmount?: number;
+  status?: "active" | "winning" | "outbid" | "cancelled";
+  createdAt: string;
+  bidderName: string;
+  bidderEmail: string;
+  isCurrentUser: boolean;
+};
+
+function normalizeProfileRole(role?: string | null, email?: string) {
+  if (role === "admin") {
+    return "admin" as const;
+  }
+
+  return email && isAdminEmail(email) ? ("admin" as const) : ("buyer" as const);
+}
+
+function parseHighlights(highlights: ItemRow["highlights"]) {
+  if (Array.isArray(highlights)) {
+    return highlights.map((entry) => String(entry));
+  }
+
+  if (typeof highlights === "string") {
+    try {
+      const parsed = JSON.parse(highlights) as unknown;
+      return Array.isArray(parsed) ? parsed.map((entry) => String(entry)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
+
 function mapItemRow(row: ItemRow): Listing {
   return {
-    ...row,
-    highlights: Array.isArray(row.highlights)
-      ? row.highlights
-      : typeof row.highlights === "string"
-        ? JSON.parse(row.highlights)
-        : [],
-    reserveMet: row.reserveMet ?? undefined
+    slug: row.slug,
+    auctionId: row.auction_id ?? undefined,
+    title: row.title,
+    category: row.category,
+    summary: row.summary,
+    mode: row.mode,
+    status: row.status ?? undefined,
+    location: row.location,
+    shipping: row.shipping,
+    currentBid: row.currentBid ?? undefined,
+    buyNowPrice: row.buyNowPrice ?? undefined,
+    minimumBid: row.minimum_bid ?? undefined,
+    reservePrice: row.reserve_price ?? undefined,
+    endsIn: formatEndsIn(row.ends_at ?? null),
+    startAt: row.starts_at ?? undefined,
+    endAt: row.ends_at ?? undefined,
+    stock: row.stock,
+    grade: row.grade,
+    gradient: row.gradient,
+    highlights: parseHighlights(row.highlights),
+    seoDescription: row.seoDescription,
+    currencyCode: row.currency_code ?? "USD",
+    bidIncrement: row.bidIncrement ?? undefined,
+    bidCount: row.bidCount ?? undefined,
+    watchers: row.watchers ?? undefined,
+    reserveMet: row.reserveMet ?? undefined,
+    seller: row.seller ?? undefined,
+    lotNumber: row.lotNumber ?? undefined,
+    imageUrls: [],
+    createdAt: row.created_at ?? undefined,
+    updatedAt: row.updated_at ?? undefined
+  };
+}
+
+async function fetchItemAssetsBySlug(slug: string) {
+  const supabase = createSupabaseAdminClient();
+  const { data } = await supabase
+    .from("item_assets")
+    .select("asset_url, alt_text, sort_order, is_primary")
+    .eq("item_slug", slug)
+    .order("sort_order", { ascending: true });
+
+  return (data as ItemAssetRow[] | null) ?? [];
+}
+
+function mapBidRow(row: BidRow, currentEmail?: string): StoredBid {
+  const bidderEmail = row.profiles?.email ?? "";
+  return {
+    id: row.id,
+    amount: row.amount,
+    maxAmount: row.max_amount ?? undefined,
+    status: row.status ?? undefined,
+    createdAt: row.created_at,
+    bidderName: row.profiles?.fullName ?? "Bidder",
+    bidderEmail,
+    isCurrentUser: Boolean(currentEmail && bidderEmail.toLowerCase() === currentEmail.toLowerCase())
+  };
+}
+
+function mapAdminItemToRow(input: AdminItemInput, actorEmail?: string) {
+  const normalized = normalizeAdminItemInput(input);
+
+  return {
+    slug: normalized.slug,
+    title: normalized.title,
+    category: normalized.category,
+    summary: normalized.summary,
+    mode: normalized.mode,
+    status: normalized.status,
+    location: normalized.location,
+    shipping: normalized.shipping,
+    currentBid: normalized.currentBid,
+    buyNowPrice: normalized.buyNowPrice,
+    minimum_bid: normalized.minimumBid,
+    reserve_price: normalized.reservePrice,
+    starts_at: normalized.startAt,
+    ends_at: normalized.endAt,
+    stock: normalized.stock,
+    grade: normalized.grade,
+    gradient: normalized.gradient,
+    highlights: normalized.highlights,
+    seoDescription: normalized.seoDescription,
+    currency_code: normalized.currencyCode,
+    bidIncrement: normalized.bidIncrement,
+    bidCount: normalized.bidCount,
+    watchers: normalized.watchers,
+    reserveMet: normalized.reserveMet,
+    seller: normalized.seller,
+    lotNumber: normalized.lotNumber,
+    created_by_email: actorEmail?.trim().toLowerCase() || null,
+    updated_by_email: actorEmail?.trim().toLowerCase() || null
   };
 }
 
@@ -35,13 +207,63 @@ export async function listStoredItems() {
   }
 
   const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.from("items").select("*").order("title");
+  const { data, error } = await supabase.from("items").select("*").order("auction_id", { ascending: false });
 
   if (error || !data?.length) {
     return featuredListings;
   }
 
   return (data as ItemRow[]).map(mapItemRow);
+}
+
+export async function listAdminItems() {
+  if (!isSupabaseConfigured()) {
+    return featuredListings.map(mapListingToAdminDraft);
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase.from("items").select("*").order("auction_id", { ascending: false });
+
+  if (error || !data?.length) {
+    return featuredListings.map(mapListingToAdminDraft);
+  }
+
+  return await Promise.all(
+    (data as ItemRow[]).map(async (row) => {
+      const assets = await fetchItemAssetsBySlug(row.slug);
+
+      return {
+        slug: row.slug,
+        title: row.title,
+        category: row.category,
+        summary: row.summary,
+        mode: row.mode,
+        status: row.status ?? "draft",
+        location: row.location,
+        shipping: row.shipping,
+        currentBid: row.currentBid ?? null,
+        buyNowPrice: row.buyNowPrice ?? null,
+        minimumBid: row.minimum_bid ?? null,
+        reservePrice: row.reserve_price ?? null,
+        startAt: row.starts_at ?? null,
+        endAt: row.ends_at ?? null,
+        stock: row.stock,
+        grade: row.grade,
+        gradient: row.gradient,
+        highlights: parseHighlights(row.highlights),
+        seoDescription: row.seoDescription,
+        currencyCode: row.currency_code ?? "USD",
+        bidIncrement: row.bidIncrement ?? null,
+        bidCount: row.bidCount ?? null,
+        watchers: row.watchers ?? null,
+        reserveMet: row.reserveMet ?? null,
+        seller: row.seller ?? null,
+        lotNumber: row.lotNumber ?? null,
+        imageUrls: assets.map((asset) => asset.asset_url),
+        heroImageUrl: assets.find((asset) => asset.is_primary)?.asset_url ?? assets[0]?.asset_url ?? null
+      };
+    })
+  );
 }
 
 export async function getStoredItemBySlug(slug: string) {
@@ -56,7 +278,277 @@ export async function getStoredItemBySlug(slug: string) {
     return featuredListings.find((listing) => listing.slug === slug) ?? null;
   }
 
-  return mapItemRow(data as ItemRow);
+  const listing = mapItemRow(data as ItemRow);
+  const assets = await fetchItemAssetsBySlug(slug);
+
+  if (assets?.length) {
+    const orderedUrls = assets.map((asset) => asset.asset_url);
+    return {
+      ...listing,
+      heroImageUrl: assets.find((asset) => asset.is_primary)?.asset_url ?? orderedUrls[0],
+      imageUrls: orderedUrls
+    };
+  }
+
+  return listing;
+}
+
+export async function upsertAdminItems(items: AdminItemInput[], actorEmail?: string) {
+  assertAdminItemPayload(items);
+
+  if (!isSupabaseConfigured()) {
+    return {
+      ok: true as const,
+      count: items.length,
+      items: items.map((item) => normalizeAdminItemInput(item))
+    };
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const payload = items.map((item) => mapAdminItemToRow(item, actorEmail));
+  const { data, error } = await supabase
+    .from("items")
+    .upsert(payload, { onConflict: "slug" })
+    .select("*");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  for (const item of items) {
+    const normalized = normalizeAdminItemInput(item);
+    await supabase.from("item_assets").delete().eq("item_slug", normalized.slug);
+
+    const assetPayload = normalized.imageUrls.map((assetUrl, index) => ({
+      item_slug: normalized.slug,
+      asset_url: assetUrl,
+      alt_text: normalized.title,
+      sort_order: index,
+      is_primary: normalized.heroImageUrl ? normalized.heroImageUrl === assetUrl : index === 0
+    }));
+
+    if (assetPayload.length) {
+      const { error: assetError } = await supabase.from("item_assets").insert(assetPayload);
+      if (assetError) {
+        throw new Error(assetError.message);
+      }
+    }
+  }
+
+  return {
+    ok: true as const,
+    count: data?.length ?? 0,
+    items: (data as ItemRow[]).map(mapItemRow)
+  };
+}
+
+export async function updateAdminItemStatus(slug: string, status: NonNullable<Listing["status"]>, actorEmail?: string) {
+  if (!isSupabaseConfigured()) {
+    return { ok: true as const };
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { error } = await supabase
+    .from("items")
+    .update({ status, updated_by_email: actorEmail?.trim().toLowerCase() || null, updated_at: new Date().toISOString() })
+    .eq("slug", slug);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await writeAuditLog({
+    actorEmail,
+    entityType: "item",
+    entityId: slug,
+    action: `status:${status}`
+  });
+
+  return { ok: true as const };
+}
+
+export async function deleteAdminItem(slug: string, actorEmail?: string) {
+  if (!isSupabaseConfigured()) {
+    return { ok: true as const };
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { error } = await supabase.from("items").delete().eq("slug", slug);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await writeAuditLog({
+    actorEmail,
+    entityType: "item",
+    entityId: slug,
+    action: "delete"
+  });
+
+  return { ok: true as const };
+}
+
+export async function listStoredItemBids(slug: string, currentEmail?: string) {
+  if (!isSupabaseConfigured()) {
+    return [] as StoredBid[];
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("bids")
+    .select("id, item_slug, user_id, amount, max_amount, status, created_at, profiles:user_id(fullName, email)")
+    .eq("item_slug", slug)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error || !data) {
+    return [] as StoredBid[];
+  }
+
+  return (data as unknown as BidRow[]).map((row) => mapBidRow(row, currentEmail));
+}
+
+async function findProfileByEmail(email: string) {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase.from("profiles").select("*").eq("email", email).maybeSingle();
+  if (error || !data) {
+    return null;
+  }
+  return data as ProfileRow;
+}
+
+async function writeAuditLog(params: {
+  actorEmail?: string;
+  actorUserId?: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  metadata?: Record<string, unknown>;
+}) {
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  await supabase.from("audit_logs").insert({
+    actor_email: params.actorEmail?.trim().toLowerCase() || null,
+    actor_user_id: params.actorUserId ?? null,
+    entity_type: params.entityType,
+    entity_id: params.entityId,
+    action: params.action,
+    metadata: params.metadata ?? {}
+  });
+}
+
+function getMinimumBidForListing(listing: Listing) {
+  const increment = listing.bidIncrement ?? 25;
+  if (typeof listing.currentBid === "number" && listing.currentBid > 0) {
+    return listing.currentBid + increment;
+  }
+  if (typeof listing.minimumBid === "number" && listing.minimumBid > 0) {
+    return listing.minimumBid;
+  }
+  return increment;
+}
+
+export async function placeStoredItemBid(slug: string, rawAmount: unknown, bidderEmail: string) {
+  const amount = assertBidPayload(rawAmount);
+
+  if (!isSupabaseConfigured()) {
+    throw new Error("Supabase is not configured yet. Add your Supabase keys to the environment first.");
+  }
+
+  const listing = await getStoredItemBySlug(slug);
+
+  if (!listing) {
+    throw new Error("Listing not found.");
+  }
+
+  if (listing.mode === "buy-now") {
+    throw new Error("This listing is direct purchase only.");
+  }
+
+  if (listing.status === "closed" || listing.status === "sold" || listing.status === "archived") {
+    throw new Error("This auction is no longer accepting bids.");
+  }
+
+  if (listing.endAt && new Date(listing.endAt).getTime() <= Date.now()) {
+    throw new Error("This auction has ended.");
+  }
+
+  const bidder = await findProfileByEmail(bidderEmail.trim().toLowerCase());
+
+  if (!bidder) {
+    throw new Error("Bidder profile not found.");
+  }
+
+  const minimum = getMinimumBidForListing(listing);
+  const normalizedAmount =
+    typeof listing.currentBid === "number" && listing.currentBid > 0
+      ? normalizeBidAmount(amount, listing.currentBid, listing.bidIncrement ?? 25)
+      : Math.max(amount, minimum);
+
+  if (normalizedAmount < minimum) {
+    throw new Error(`Minimum valid bid is ${minimum}.`);
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { error: insertError } = await supabase.from("bids").insert({
+    item_slug: slug,
+    user_id: bidder.id,
+    amount: normalizedAmount,
+    max_amount: normalizedAmount,
+    status: "winning"
+  });
+
+  if (insertError) {
+    throw new Error(insertError.message);
+  }
+
+  const nextBidCount = (listing.bidCount ?? 0) + 1;
+  const reserveMet =
+    Boolean(listing.reserveMet) ||
+    (typeof listing.reservePrice === "number" ? normalizedAmount >= listing.reservePrice : false);
+
+  const { error: updateError } = await supabase
+    .from("items")
+    .update({
+      currentBid: normalizedAmount,
+      bidCount: nextBidCount,
+      reserveMet,
+      status: listing.status === "draft" ? "live" : listing.status,
+      updated_at: new Date().toISOString()
+    })
+    .eq("slug", slug);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  await supabase
+    .from("bids")
+    .update({ status: "outbid" })
+    .eq("item_slug", slug)
+    .lt("created_at", new Date().toISOString())
+    .neq("user_id", bidder.id)
+    .eq("status", "winning");
+
+  await writeAuditLog({
+    actorEmail: bidderEmail,
+    actorUserId: bidder.id,
+    entityType: "bid",
+    entityId: slug,
+    action: "place",
+    metadata: { amount: normalizedAmount }
+  });
+
+  return {
+    ok: true as const,
+    currentBid: normalizedAmount,
+    bidCount: nextBidCount,
+    reserveMet
+  };
 }
 
 export async function createUser(profile: UserProfile, password: string) {
@@ -69,6 +561,7 @@ export async function createUser(profile: UserProfile, password: string) {
 
   const email = profile.email.trim().toLowerCase();
   const phone = profile.phone.trim();
+  const role = normalizeProfileRole(profile.role, email);
 
   if (!email || !phone || password.trim().length < 8) {
     return {
@@ -85,7 +578,8 @@ export async function createUser(profile: UserProfile, password: string) {
     user_metadata: {
       fullName: profile.fullName.trim(),
       phone,
-      company: profile.company?.trim() ?? ""
+      company: profile.company?.trim() ?? "",
+      role
     }
   });
 
@@ -101,6 +595,7 @@ export async function createUser(profile: UserProfile, password: string) {
     fullName: profile.fullName.trim(),
     email,
     phone,
+    role,
     company: profile.company?.trim() ?? "",
     address: profile.address?.trim() ?? "",
     city: profile.city?.trim() ?? "",
@@ -140,9 +635,10 @@ export async function authenticateUser(email: string, password: string) {
     };
   }
 
+  const normalizedEmail = email.trim().toLowerCase();
   const authClient = createSupabaseServerAuthClient();
   const { data: authData, error } = await authClient.auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
+    email: normalizedEmail,
     password
   });
 
@@ -164,17 +660,28 @@ export async function authenticateUser(email: string, password: string) {
   }
 
   if (!profile) {
+    const fallbackRole = normalizeProfileRole(
+      String(authData.user.user_metadata.role ?? ""),
+      authData.user.email ?? normalizedEmail
+    );
+
     const fallbackProfile: UserProfile = {
       fullName: String(authData.user.user_metadata.fullName ?? ""),
-      email: authData.user.email ?? email.trim().toLowerCase(),
+      email: authData.user.email ?? normalizedEmail,
       phone: String(authData.user.user_metadata.phone ?? ""),
-      company: String(authData.user.user_metadata.company ?? "")
+      company: String(authData.user.user_metadata.company ?? ""),
+      role: fallbackRole
     };
 
     return { ok: true as const, profile: fallbackProfile };
   }
 
-  const { id: _id, ...publicProfile } = profile as ProfileRow;
+  const normalizedProfile = {
+    ...(profile as ProfileRow),
+    role: normalizeProfileRole((profile as ProfileRow).role, (profile as ProfileRow).email)
+  };
+
+  const { id: _id, ...publicProfile } = normalizedProfile;
   return { ok: true as const, profile: publicProfile };
 }
 
@@ -198,7 +705,8 @@ export async function updateUserProfile(email: string, updates: Partial<UserProf
   const nextProfile = {
     ...currentProfile,
     ...updates,
-    email: normalizedEmail
+    email: normalizedEmail,
+    role: normalizeProfileRole(updates.role ?? currentProfile.role, normalizedEmail)
   };
 
   const { error } = await supabase.from("profiles").update(nextProfile).eq("id", currentProfile.id);

@@ -39,20 +39,26 @@ export type AuctionActionResult =
 
 export function createLiveAuctionState(listing: Listing, now = Date.now()): LiveAuctionState {
   const increment = listing.bidIncrement ?? 25;
-  const openingBid = listing.currentBid ?? listing.buyNowPrice ?? 0;
+  const openingBid = listing.currentBid ?? listing.minimumBid ?? listing.buyNowPrice ?? 0;
+  const startedAt = listing.startAt ? new Date(listing.startAt).getTime() : now;
+  const endsAt = listing.endAt ? new Date(listing.endAt).getTime() : now + AUCTION_DURATION_MS;
+  const reservePrice =
+    listing.mode === "buy-now"
+      ? null
+      : (listing.reservePrice ?? (listing.minimumBid ?? openingBid) + increment * (listing.reserveMet ? 0 : 3));
 
   return {
     currentBid: openingBid,
     bidCount: listing.bidCount ?? 0,
     reserveMet: Boolean(listing.reserveMet),
-    reservePrice: listing.mode === "buy-now" ? null : openingBid + increment * (listing.reserveMet ? 0 : 3),
+    reservePrice,
     leadingBidder: "market",
     userLastBid: null,
     userMaxBid: null,
-    startedAt: now,
-    endsAt: now + AUCTION_DURATION_MS,
+    startedAt,
+    endsAt,
     nextMarketBidAt: listing.mode === "buy-now" ? null : now + getRandomMarketBidDelay(),
-    isClosed: false
+    isClosed: endsAt <= now || listing.status === "closed" || listing.status === "sold" || listing.status === "archived"
   };
 }
 

@@ -4,6 +4,7 @@ export type UserProfile = {
   fullName: string;
   email: string;
   phone: string;
+  role?: "buyer" | "admin";
   company?: string;
   address?: string;
   city?: string;
@@ -127,6 +128,9 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 export function signOut() {
   writeSessionProfile(null);
   emitAuthChanged();
+  fetch("/api/auth/logout", {
+    method: "POST"
+  }).catch(() => undefined);
 }
 
 export async function updateCurrentUserProfile(updates: Partial<UserProfile>) {

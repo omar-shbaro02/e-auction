@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ProductAuctionView } from "@/components/product-auction-view";
-import { featuredListings, getListingBySlug } from "@/lib/data";
+import { getSeedListings } from "@/lib/marketplace";
+import { getMarketplaceListingBySlug } from "@/lib/marketplace";
 import { absoluteUrl, listingJsonLd } from "@/lib/seo";
 
 type Props = {
@@ -9,12 +10,12 @@ type Props = {
 };
 
 export async function generateStaticParams() {
-  return featuredListings.map((listing) => ({ slug: listing.slug }));
+  return getSeedListings().map((listing) => ({ slug: listing.slug }));
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const listing = getListingBySlug(slug);
+  const listing = await getMarketplaceListingBySlug(slug);
 
   if (!listing) {
     return {};
@@ -33,7 +34,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function ProductPage({ params }: Props) {
   const { slug } = await params;
-  const listing = getListingBySlug(slug);
+  const listing = await getMarketplaceListingBySlug(slug);
 
   if (!listing) {
     notFound();

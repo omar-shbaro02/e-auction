@@ -4,7 +4,7 @@ import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { featuredListings, formatCurrency, showcaseCategories, siteName, siteTagline } from "@/lib/data";
+import { featuredListings, formatCurrency, showcaseCategories, siteName } from "@/lib/data";
 import { authChangedEvent, getCurrentUser, signOut } from "@/lib/auth";
 import { searchCategories, searchListings } from "@/lib/search";
 
@@ -20,6 +20,7 @@ export function Header() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
+  const [userRole, setUserRole] = useState<"buyer" | "admin">("buyer");
 
   useEffect(() => {
     setQuery(searchParams.get("q") ?? "");
@@ -30,6 +31,7 @@ export function Header() {
       const user = getCurrentUser();
       setUserName(user?.fullName ?? "");
       setUserEmail(user?.email ?? "");
+      setUserRole(user?.role === "admin" ? "admin" : "buyer");
     }
 
     syncUser();
@@ -86,28 +88,46 @@ export function Header() {
     <header className="header">
       <div className="site-shell header-inner">
         <Link className="brand-lockup" href="/">
-          <span className="brand-mark" aria-hidden="true">
-            <span>L</span>
-          </span>
-          <span className="brand-copy">
-            <strong>{siteName}</strong>
-            <span>{siteTagline}</span>
-          </span>
+          <img
+            alt={`${siteName} logo`}
+            className="brand-logo"
+            height="200"
+            src="/weeklybids-logo.svg"
+            width="523"
+          />
         </Link>
 
         <nav className="nav-links" aria-label="Primary">
           <Link className={pathname === "/" ? "nav-link-active" : ""} href="/">
-            Home
+            Auctions
           </Link>
           <Link className={pathname === "/categories" ? "nav-link-active" : ""} href="/categories">
             Categories
           </Link>
+          <Link href="/#how-it-works">How It Works</Link>
+          <Link href="/#ending-soon">Ending Soon</Link>
         </nav>
 
         <div className="header-search-shell">
           <form className="header-search" onSubmit={handleSubmit} ref={searchRef}>
             <span className="header-search-icon" aria-hidden="true">
-              O
+              <svg viewBox="0 0 24 24">
+                <circle
+                  cx="11"
+                  cy="11"
+                  fill="none"
+                  r="6.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                />
+                <path
+                  d="m16 16 4 4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeWidth="1.8"
+                />
+              </svg>
             </span>
             <input
               aria-expanded={open && !!normalizedQuery}
@@ -188,13 +208,13 @@ export function Header() {
         </div>
 
         <div className="header-actions">
-          <button className="header-select" type="button">
-            English
-          </button>
-          <button className="header-select" type="button">
-            USD
-          </button>
           <div className="header-account-shell" ref={accountRef}>
+            <Link className="header-login" href="/auth">
+              Login
+            </Link>
+            <Link className="header-signup" href="/signup">
+              Sign Up
+            </Link>
             <button
               aria-expanded={accountOpen}
               aria-label="Account"
@@ -213,6 +233,15 @@ export function Header() {
                     <h3>{userName}</h3>
                     <p>{userEmail}</p>
                     <div className="account-dropdown-actions">
+                      {userRole === "admin" ? (
+                        <Link
+                          className="auction-secondary-cta account-dropdown-button"
+                          href={{ pathname: "/admin/items" }}
+                          onClick={() => setAccountOpen(false)}
+                        >
+                          Admin dashboard
+                        </Link>
+                      ) : null}
                       <Link
                         className="auth-hero-button account-dropdown-button"
                         href={{ pathname: "/checkout" }}

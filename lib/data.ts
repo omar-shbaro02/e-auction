@@ -1,27 +1,39 @@
 export type ListingMode = "auction" | "buy-now" | "hybrid";
+export type ListingStatus = "draft" | "scheduled" | "live" | "closed" | "sold" | "archived";
 
 export type Listing = {
   slug: string;
+  auctionId?: number;
   title: string;
   category: string;
   summary: string;
   mode: ListingMode;
+  status?: ListingStatus;
   location: string;
   shipping: string;
   currentBid?: number;
   buyNowPrice?: number;
+  minimumBid?: number;
+  reservePrice?: number;
   endsIn?: string;
+  startAt?: string;
+  endAt?: string;
   stock: number;
   grade: string;
   gradient: string;
   highlights: string[];
   seoDescription: string;
+  currencyCode?: string;
   bidIncrement?: number;
   bidCount?: number;
   watchers?: number;
   reserveMet?: boolean;
   seller?: string;
   lotNumber?: string;
+  heroImageUrl?: string;
+  imageUrls?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ShowcaseCategory = {
@@ -38,8 +50,8 @@ export type ShortcutCategory = {
 
 export const currencyCode = "USD";
 
-export const siteName = "LotLane";
-export const siteTagline = "Win Better Lots. Move Stock Faster.";
+export const siteName = "WeeklyBids";
+export const siteTagline = "New Deals. Every Week.";
 export const siteDescription =
   "LotLane blends timed auctions and direct checkout into one premium B2B resale marketplace for liquidation stock, pallets, and curated surplus inventory.";
 
