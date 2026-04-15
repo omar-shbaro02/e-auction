@@ -20,7 +20,7 @@ export function AuthView({ initialMode = "login" }: AuthViewProps) {
   const [signupName, setSignupName] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPhone, setSignupPhone] = useState("");
-  const [signupCompany, setSignupCompany] = useState("");
+  const [signupAddress, setSignupAddress] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupPasswordConfirm, setSignupPasswordConfirm] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,7 +54,7 @@ export function AuthView({ initialMode = "login" }: AuthViewProps) {
         fullName: signupName.trim(),
         email: signupEmail.trim(),
         phone: signupPhone.trim(),
-        company: signupCompany.trim()
+        address: signupAddress.trim()
       },
       signupPassword
     );
@@ -185,12 +185,12 @@ export function AuthView({ initialMode = "login" }: AuthViewProps) {
                   />
                 </label>
                 <label className="checkout-field">
-                  <span>Company</span>
+                  <span>Address</span>
                   <input
-                    onChange={(event) => setSignupCompany(event.target.value)}
-                    placeholder="Acme Resale LLC"
+                    onChange={(event) => setSignupAddress(event.target.value)}
+                    placeholder="123 Warehouse Road"
                     type="text"
-                    value={signupCompany}
+                    value={signupAddress}
                   />
                 </label>
                 <label className="checkout-field">

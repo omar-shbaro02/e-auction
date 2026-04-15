@@ -10,7 +10,7 @@ import {
   createSupabaseServerAuthClient,
   isSupabaseConfigured
 } from "@/lib/supabase-server";
-import { assertAdminItemPayload, assertBidPayload } from "@/lib/validators";
+import { assertAdminItemPayload, assertBidPayload, assertPaymentMethod } from "@/lib/validators";
 
 type ItemRow = {
   auction_id?: number | null;
@@ -78,6 +78,32 @@ export type StoredBid = {
   bidderName: string;
   bidderEmail: string;
   isCurrentUser: boolean;
+};
+
+export type PaymentMethod = "cod" | "whish";
+
+export type CheckoutOrderItemInput = {
+  slug: string;
+  quantity: number;
+};
+
+export type CheckoutOrderInput = {
+  items: CheckoutOrderItemInput[];
+  paymentMethod: PaymentMethod;
+  profile: UserProfile;
+  notes?: string;
+};
+
+export type StoredOrder = {
+  id: string;
+  status: string;
+  paymentMethod: PaymentMethod;
+  paymentStatus: string;
+  subtotal: number;
+  currencyCode: string;
+  createdAt: string;
+  customerEmail: string;
+  itemCount: number;
 };
 
 function normalizeProfileRole(role?: string | null, email?: string) {
@@ -418,6 +444,17 @@ async function findProfileByEmail(email: string) {
   return data as ProfileRow;
 }
 
+function createWhishPlaceholder(orderId: string, amount: number) {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  return {
+    provider: "whish" as const,
+    providerReference: `WHISH-${orderId.slice(0, 8).toUpperCase()}`,
+    paymentUrl: `${baseUrl}/checkout?whish_order=${orderId}`,
+    message:
+      "Whish merchant API is not wired yet. This placeholder keeps the architecture ready for the real provider session or QR flow."
+  };
+}
+
 async function writeAuditLog(params: {
   actorEmail?: string;
   actorUserId?: string;
@@ -549,6 +586,219 @@ export async function placeStoredItemBid(slug: string, rawAmount: unknown, bidde
     bidCount: nextBidCount,
     reserveMet
   };
+}
+
+export async function createCheckoutOrder(input: CheckoutOrderInput, email: string) {
+  const paymentMethod = assertPaymentMethod(input.paymentMethod);
+  const profile = await findProfileByEmail(email.trim().toLowerCase());
+
+  if (!profile) {
+    throw new Error("Customer profile not found.");
+  }
+
+  if (!input.items.length) {
+    throw new Error("At least one checkout item is required.");
+  }
+
+  const uniqueItems = input.items.filter((item) => item.quantity > 0);
+  const listings = await Promise.all(uniqueItems.map((item) => getStoredItemBySlug(item.slug)));
+
+  const resolved = listings.map((listing, index) => ({ listing, quantity: uniqueItems[index].quantity }));
+
+  if (resolved.some((entry) => !entry.listing)) {
+    throw new Error("One or more cart items could not be found.");
+  }
+
+  const pricedItems = resolved.map((entry) => {
+    const listing = entry.listing as Listing;
+    const unitPrice = listing.buyNowPrice ?? listing.currentBid ?? listing.minimumBid ?? 0;
+
+    if (!unitPrice) {
+      throw new Error(`Unable to calculate price for ${listing.title}.`);
+    }
+
+    return {
+      listing,
+      quantity: entry.quantity,
+      unitPrice
+    };
+  });
+
+  const subtotal = pricedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+
+  if (!isSupabaseConfigured()) {
+    const whish = paymentMethod === "whish" ? createWhishPlaceholder("local-order", subtotal) : null;
+    return {
+      ok: true as const,
+      orderId: "local-order",
+      paymentMethod,
+      paymentStatus: paymentMethod === "cod" ? "awaiting_cod_confirmation" : "awaiting_payment",
+      whish
+    };
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const shippingAddress = {
+    fullName: input.profile.fullName,
+    phone: input.profile.phone,
+    address: input.profile.address ?? "",
+    city: input.profile.city ?? "",
+    state: input.profile.state ?? "",
+    postalCode: input.profile.postalCode ?? "",
+    country: input.profile.country ?? ""
+  };
+
+  const orderPayload = {
+    user_id: profile.id,
+    status: paymentMethod === "cod" ? "authorized" : "pending",
+    order_type: "buy-now",
+    payment_method: paymentMethod,
+    payment_status: paymentMethod === "cod" ? "awaiting_cod_confirmation" : "awaiting_payment",
+    shipping_address: shippingAddress,
+    notes: input.notes?.trim() || null,
+    subtotal,
+    currency_code: "USD"
+  };
+
+  const { data: order, error: orderError } = await supabase.from("orders").insert(orderPayload).select("*").single();
+
+  if (orderError || !order) {
+    throw new Error(orderError?.message ?? "Unable to create order.");
+  }
+
+  const orderItemsPayload = pricedItems.map((item) => ({
+    order_id: order.id,
+    item_slug: item.listing.slug,
+    quantity: item.quantity,
+    unit_price: item.unitPrice
+  }));
+
+  const { error: orderItemsError } = await supabase.from("order_items").insert(orderItemsPayload);
+
+  if (orderItemsError) {
+    throw new Error(orderItemsError.message);
+  }
+
+  let whish: ReturnType<typeof createWhishPlaceholder> | null = null;
+
+  if (paymentMethod === "whish") {
+    whish = createWhishPlaceholder(order.id, subtotal);
+
+    const { error: paymentAttemptError } = await supabase.from("payment_attempts").insert({
+      order_id: order.id,
+      provider: "whish",
+      provider_reference: whish.providerReference,
+      provider_status: "created",
+      payment_url: whish.paymentUrl,
+      request_payload: { subtotal },
+      response_payload: whish
+    });
+
+    if (paymentAttemptError) {
+      throw new Error(paymentAttemptError.message);
+    }
+  } else {
+    const { error: paymentAttemptError } = await supabase.from("payment_attempts").insert({
+      order_id: order.id,
+      provider: "cod",
+      provider_reference: `COD-${order.id.slice(0, 8).toUpperCase()}`,
+      provider_status: "awaiting_collection",
+      request_payload: { subtotal },
+      response_payload: { method: "cash_on_delivery" }
+    });
+
+    if (paymentAttemptError) {
+      throw new Error(paymentAttemptError.message);
+    }
+  }
+
+  await writeAuditLog({
+    actorEmail: email,
+    actorUserId: profile.id,
+    entityType: "order",
+    entityId: order.id,
+    action: "create",
+    metadata: {
+      paymentMethod,
+      subtotal,
+      itemCount: pricedItems.length
+    }
+  });
+
+  return {
+    ok: true as const,
+    orderId: order.id as string,
+    paymentMethod,
+    paymentStatus: order.payment_status as string,
+    whish
+  };
+}
+
+export async function listAdminOrders() {
+  if (!isSupabaseConfigured()) {
+    return [] as StoredOrder[];
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("orders")
+    .select("id, status, payment_method, payment_status, subtotal, currency_code, created_at, profiles:user_id(email), order_items(id)")
+    .order("created_at", { ascending: false });
+
+  if (error || !data) {
+    return [] as StoredOrder[];
+  }
+
+  return (data as Array<Record<string, unknown>>).map((row) => ({
+    id: String(row.id),
+    status: String(row.status),
+    paymentMethod: row.payment_method as PaymentMethod,
+    paymentStatus: String(row.payment_status),
+    subtotal: Number(row.subtotal ?? 0),
+    currencyCode: String(row.currency_code ?? "USD"),
+    createdAt: String(row.created_at),
+    customerEmail: String((row.profiles as { email?: string } | null)?.email ?? ""),
+    itemCount: Array.isArray(row.order_items) ? row.order_items.length : 0
+  }));
+}
+
+export async function updateOrderPaymentState(
+  orderId: string,
+  input: { paymentStatus?: string; status?: string },
+  actorEmail?: string
+) {
+  if (!isSupabaseConfigured()) {
+    return { ok: true as const };
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const updatePayload: Record<string, unknown> = {
+    updated_at: new Date().toISOString()
+  };
+
+  if (input.paymentStatus) {
+    updatePayload.payment_status = input.paymentStatus;
+  }
+
+  if (input.status) {
+    updatePayload.status = input.status;
+  }
+
+  const { error } = await supabase.from("orders").update(updatePayload).eq("id", orderId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await writeAuditLog({
+    actorEmail,
+    entityType: "order",
+    entityId: orderId,
+    action: "update-payment-state",
+    metadata: input
+  });
+
+  return { ok: true as const };
 }
 
 export async function createUser(profile: UserProfile, password: string) {

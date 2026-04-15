@@ -14,12 +14,13 @@ import {
 } from "@/lib/auth";
 import { cartChangedEvent, clearCart, readCart, type CartItem } from "@/lib/cart";
 
+type PaymentMethod = "cod" | "whish";
+
 function emptyProfile(): UserProfile {
   return {
     fullName: "",
     email: "",
     phone: "",
-    company: "",
     address: "",
     city: "",
     state: "",
@@ -39,6 +40,9 @@ export function CheckoutView() {
   const [profile, setProfile] = useState<UserProfile>(emptyProfile());
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cod");
 
   useEffect(() => {
     function syncCart() {
@@ -91,20 +95,59 @@ export function CheckoutView() {
       return;
     }
 
-    if (
-      !profile.cardName?.trim() ||
-      !profile.cardNumber?.trim() ||
-      !profile.cardExpiry?.trim() ||
-      !profile.cardCvv?.trim()
-    ) {
-      setError("Please provide cardholder name, card number, expiry, and CVV.");
-      return;
-    }
-
-    await updateCurrentUserProfile(profile);
-    clearCart();
+    setIsSubmitting(true);
     setError("");
-    setSubmitted(true);
+    setSuccessMessage("");
+
+    try {
+      await updateCurrentUserProfile(profile);
+
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          items,
+          paymentMethod,
+          profile
+        })
+      });
+
+      const result = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        orderId?: string;
+        paymentStatus?: string;
+        whish?: {
+          paymentUrl?: string;
+          providerReference?: string;
+          message?: string;
+        } | null;
+      };
+
+      if (!response.ok || !result.ok) {
+        setError(result.error || "Unable to place order.");
+        return;
+      }
+
+      clearCart();
+      setSubmitted(true);
+
+      if (paymentMethod === "whish" && result.whish?.paymentUrl) {
+        setSuccessMessage(
+          `Order created. Redirecting you to the Whish payment step with reference ${result.whish.providerReference}.`
+        );
+        window.location.href = result.whish.paymentUrl;
+        return;
+      }
+
+      setSuccessMessage("Order created successfully. Cash on delivery is now pending admin confirmation.");
+    } catch {
+      setError("Unable to place order right now. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -113,7 +156,7 @@ export function CheckoutView() {
         <div>
           <span className="eyebrow">Checkout</span>
           <h1>Complete your order.</h1>
-          <p>Confirm billing and delivery information, then place the order for your selected lot.</p>
+          <p>Choose Whish or cash on delivery, confirm your shipping details, and place the order.</p>
         </div>
         <div className="commerce-summary-card detail-card">
           <small className="muted">Estimated total</small>
@@ -136,7 +179,7 @@ export function CheckoutView() {
         <section className="page-section">
           <div className="category-empty-state detail-card">
             <h3>Order placed successfully.</h3>
-            <p>Your cart has been cleared and the lot is now queued for fulfilment review.</p>
+            <p>{successMessage || "Your order is now queued for payment or fulfilment review."}</p>
             <Link className="auction-button" href="/">
               Return to marketplace
             </Link>
@@ -173,12 +216,12 @@ export function CheckoutView() {
                 />
               </label>
               <label className="checkout-field">
-                <span>Company</span>
+                <span>Address</span>
                 <input
-                  onChange={(event) => handleProfileChange("company", event.target.value)}
-                  placeholder="Acme Resale LLC"
+                  onChange={(event) => handleProfileChange("address", event.target.value)}
+                  placeholder="123 Warehouse Road"
                   type="text"
-                  value={profile.company ?? ""}
+                  value={profile.address ?? ""}
                 />
               </label>
               <label className="checkout-field">
@@ -194,34 +237,25 @@ export function CheckoutView() {
                 <span>Phone</span>
                 <input
                   onChange={(event) => handleProfileChange("phone", event.target.value)}
-                  placeholder="+1 555 010 4422"
+                  placeholder="+961 ..."
                   type="tel"
                   value={profile.phone}
-                />
-              </label>
-              <label className="checkout-field checkout-field-wide">
-                <span>Shipping address</span>
-                <input
-                  onChange={(event) => handleProfileChange("address", event.target.value)}
-                  placeholder="123 Warehouse Road"
-                  type="text"
-                  value={profile.address ?? ""}
                 />
               </label>
               <label className="checkout-field">
                 <span>City</span>
                 <input
                   onChange={(event) => handleProfileChange("city", event.target.value)}
-                  placeholder="Dallas"
+                  placeholder="Beirut"
                   type="text"
                   value={profile.city ?? ""}
                 />
               </label>
               <label className="checkout-field">
-                <span>State</span>
+                <span>State / Region</span>
                 <input
                   onChange={(event) => handleProfileChange("state", event.target.value)}
-                  placeholder="Texas"
+                  placeholder="Mount Lebanon"
                   type="text"
                   value={profile.state ?? ""}
                 />
@@ -230,7 +264,7 @@ export function CheckoutView() {
                 <span>Postal code</span>
                 <input
                   onChange={(event) => handleProfileChange("postalCode", event.target.value)}
-                  placeholder="75001"
+                  placeholder="0000"
                   type="text"
                   value={profile.postalCode ?? ""}
                 />
@@ -239,47 +273,36 @@ export function CheckoutView() {
                 <span>Country</span>
                 <input
                   onChange={(event) => handleProfileChange("country", event.target.value)}
-                  placeholder="United States"
+                  placeholder="Lebanon"
                   type="text"
                   value={profile.country ?? ""}
                 />
               </label>
-              <label className="checkout-field checkout-field-wide">
-                <span>Cardholder name</span>
-                <input
-                  onChange={(event) => handleProfileChange("cardName", event.target.value)}
-                  placeholder="Jane Buyer"
-                  type="text"
-                  value={profile.cardName ?? ""}
-                />
-              </label>
-              <label className="checkout-field checkout-field-wide">
-                <span>Card number</span>
-                <input
-                  onChange={(event) => handleProfileChange("cardNumber", event.target.value)}
-                  placeholder="4111 1111 1111 1111"
-                  type="text"
-                  value={profile.cardNumber ?? ""}
-                />
-              </label>
-              <label className="checkout-field">
-                <span>Expiry</span>
-                <input
-                  onChange={(event) => handleProfileChange("cardExpiry", event.target.value)}
-                  placeholder="09/28"
-                  type="text"
-                  value={profile.cardExpiry ?? ""}
-                />
-              </label>
-              <label className="checkout-field">
-                <span>CVV</span>
-                <input
-                  onChange={(event) => handleProfileChange("cardCvv", event.target.value)}
-                  placeholder="123"
-                  type="password"
-                  value={profile.cardCvv ?? ""}
-                />
-              </label>
+            </div>
+
+            <div className="payment-method-panel">
+              <div className="admin-section-head">
+                <h3>Payment method</h3>
+                <p>Select how this order should be settled.</p>
+              </div>
+              <div className="payment-method-grid">
+                <button
+                  className={paymentMethod === "cod" ? "payment-method-card active" : "payment-method-card"}
+                  onClick={() => setPaymentMethod("cod")}
+                  type="button"
+                >
+                  <strong>Cash on Delivery</strong>
+                  <span>Admin confirmation required before shipment release.</span>
+                </button>
+                <button
+                  className={paymentMethod === "whish" ? "payment-method-card active" : "payment-method-card"}
+                  onClick={() => setPaymentMethod("whish")}
+                  type="button"
+                >
+                  <strong>Whish</strong>
+                  <span>Creates a Whish payment attempt and redirects into the provider flow placeholder.</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -307,9 +330,13 @@ export function CheckoutView() {
               <span>Total</span>
               <strong>{formatCurrency(grandTotal)}</strong>
             </div>
+            <div className="checkout-payment-summary">
+              <strong>Selected payment</strong>
+              <span>{paymentMethod === "cod" ? "Cash on delivery" : "Whish"}</span>
+            </div>
             {error ? <p className="auth-error">{error}</p> : null}
-            <button className="cart-checkout" onClick={handlePlaceOrder} type="button">
-              Place order
+            <button className="cart-checkout" disabled={isSubmitting} onClick={handlePlaceOrder} type="button">
+              {isSubmitting ? "Processing..." : paymentMethod === "cod" ? "Place COD order" : "Continue to Whish"}
             </button>
             <Link className="commerce-inline-link" href={{ pathname: "/cart" }}>
               Return to cart

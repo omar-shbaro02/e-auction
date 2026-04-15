@@ -39,3 +39,10 @@ export function assertBidPayload(amount: unknown) {
   return requirePositiveNumber(amount, "Bid amount");
 }
 
+export function assertPaymentMethod(value: unknown) {
+  if (value !== "cod" && value !== "whish") {
+    throw new Error("Payment method must be cod or whish.");
+  }
+
+  return value;
+}

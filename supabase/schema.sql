@@ -140,6 +140,10 @@ create table if not exists public.orders (
   user_id uuid not null references public.profiles (id) on delete restrict,
   status text not null default 'pending' check (status in ('pending', 'authorized', 'paid', 'failed', 'fulfilled', 'cancelled', 'refunded')),
   order_type text not null default 'auction-win' check (order_type in ('auction-win', 'buy-now', 'manual')),
+  payment_method text not null default 'cod' check (payment_method in ('cod', 'whish')),
+  payment_status text not null default 'pending' check (payment_status in ('pending', 'awaiting_payment', 'paid', 'failed', 'awaiting_cod_confirmation', 'collected', 'cancelled')),
+  shipping_address jsonb not null default '{}'::jsonb,
+  notes text,
   subtotal numeric not null default 0,
   currency_code text not null default 'USD',
   created_at timestamptz not null default now(),
@@ -166,6 +170,19 @@ create table if not exists public.audit_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.payment_attempts (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders (id) on delete cascade,
+  provider text not null check (provider in ('whish', 'cod')),
+  provider_reference text,
+  provider_status text not null default 'created',
+  payment_url text,
+  request_payload jsonb not null default '{}'::jsonb,
+  response_payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.bids
   add column if not exists max_amount numeric;
 
@@ -177,6 +194,7 @@ create index if not exists bids_user_id_created_at_idx on public.bids (user_id, 
 create index if not exists item_assets_item_slug_sort_order_idx on public.item_assets (item_slug, sort_order asc);
 create index if not exists orders_user_id_created_at_idx on public.orders (user_id, created_at desc);
 create index if not exists audit_logs_entity_idx on public.audit_logs (entity_type, entity_id, created_at desc);
+create index if not exists payment_attempts_order_id_created_at_idx on public.payment_attempts (order_id, created_at desc);
 create index if not exists items_mode_idx on public.items (mode);
 create index if not exists items_category_idx on public.items (category);
 create index if not exists items_status_idx on public.items (status);
@@ -190,6 +208,7 @@ alter table public.item_assets enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.payment_attempts enable row level security;
 
 do $$
 begin
@@ -274,6 +293,21 @@ begin
     where schemaname = 'public' and tablename = 'order_items' and policyname = 'Users read own order items'
   ) then
     create policy "Users read own order items" on public.order_items
+      for select using (
+        exists (
+          select 1
+          from public.orders o
+          where o.id = order_id and o.user_id = auth.uid()
+        )
+      );
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public' and tablename = 'payment_attempts' and policyname = 'Users read own payment attempts'
+  ) then
+    create policy "Users read own payment attempts" on public.payment_attempts
       for select using (
         exists (
           select 1
